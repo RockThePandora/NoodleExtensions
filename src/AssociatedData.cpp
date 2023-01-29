@@ -39,8 +39,13 @@ ObjectCustomData::ObjectCustomData(const rapidjson::Value &customData,
                                    CustomJSONData::CustomNoteData *noteData,
                                    CustomJSONData::CustomObstacleData *obstacleData, bool v2) {
     auto [x, y] = NEJSON::ReadOptionalPair(customData, v2 ? NoodleExtensions::Constants::V2_POSITION : NoodleExtensions::Constants::NOTE_OFFSET);
+    auto [tailX, tailY] = NEJSON::ReadOptionalPair(customData, NoodleExtensions::Constants::TAIL_NOTE_OFFSET);
     startX = x;
     startY = y;
+
+    tailStartX = tailX;
+    tailStartY = tailY;
+
     // TODO: Mirror X
 
     rotation = NEJSON::ReadOptionalRotation(customData, v2 ? NoodleExtensions::Constants::V2_ROTATION : NoodleExtensions::Constants::WORLD_ROTATION);
@@ -75,6 +80,8 @@ ObjectCustomData::ObjectCustomData(const rapidjson::Value &customData,
     disableNoteGravity = NEJSON::ReadOptionalBool(customData, v2 ? NoodleExtensions::Constants::V2_NOTE_GRAVITY_DISABLE : NoodleExtensions::Constants::NOTE_GRAVITY_DISABLE);
     disableNoteLook = NEJSON::ReadOptionalBool(customData, v2 ? NoodleExtensions::Constants::V2_NOTE_LOOK_DISABLE : NoodleExtensions::Constants::NOTE_LOOK_DISABLE).value_or(false);
     scale = NEJSON::ReadOptionalScale(customData, v2 ? NoodleExtensions::Constants::V2_SCALE : NoodleExtensions::Constants::OBSTACLE_SIZE);
+
+    link = NEJSON::ReadOptionalString(customData, NoodleExtensions::Constants::LINK);
 
     // TODO: MIRROR WIDTH AND OBSTACLE START X
 

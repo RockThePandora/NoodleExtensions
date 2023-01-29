@@ -43,6 +43,8 @@ struct AnimationObjectData {
 struct ObjectCustomData {
     std::optional<float> startX;
     std::optional<float> startY;
+    std::optional<float> tailStartX;
+    std::optional<float> tailStartY;
 
     std::optional<NEVector::Quaternion> rotation;
     std::optional<NEVector::Quaternion> localRotation;
@@ -54,6 +56,8 @@ struct ObjectCustomData {
     // notes
     std::optional<bool> disableNoteGravity;
     bool disableNoteLook;
+    std::optional<std::string> link;
+
 
     // obstacles
     std::optional<std::array<std::optional<float>, 3>> scale;
@@ -70,7 +74,8 @@ struct BeatmapObjectAssociatedData {
     BeatmapObjectAssociatedData(BeatmapObjectAssociatedData const&) = default;
 
     // Set in NotesInTimeRowProcessor.ProcessAllNotesInTimeRow
-    std::optional<float> startNoteLineLayer;
+    float startNoteLineLayer = 0;
+    float tailStartNoteLineLayer = 0;
 
     NEVector::Quaternion worldRotation;
     NEVector::Quaternion localRotation;
@@ -87,7 +92,8 @@ struct BeatmapObjectAssociatedData {
     bool mirror = true;
 
     // flip for notes
-    std::optional<NEVector::Vector2> flip;
+    std::optional<float> flipX;
+    std::optional<float> flipY;
 
     // hide for obstacles
     bool doUnhide;

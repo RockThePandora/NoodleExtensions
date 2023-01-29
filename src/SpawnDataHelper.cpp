@@ -15,25 +15,21 @@ using namespace GlobalNamespace;
 
 
 
-//float SpawnDataHelperF::GetSpawnAheadTime(BeatmapObjectSpawnMovementData *spawnMovementData, std::optional<float> inputNjs, std::optional<float> inputOffset) {
-//    return spawnMovementData->moveDuration + (GetJumpDuration(inputNjs, inputOffset) * 0.5f);
-//}
-
 
 
 void SpawnDataHelper::GetNoteJumpValues(BeatmapObjectSpawnController::InitData *initData,
                                         BeatmapObjectSpawnMovementData *spawnMovementData,
-                                        std::optional<float> const inputNoteJumpMovementSpeed,
-                                        std::optional<float> const inputNoteJumpStartBeatOffset,
+                                        std::optional<float> const njs,
+                                        std::optional<float> const startBeatOffset,
                                         float &jumpDuration, float &jumpDistance,
                                         NEVector::Vector3 &localMoveStartPos, NEVector::Vector3 &localMoveEndPos,
                                         NEVector::Vector3 &localJumpEndPos) {
-    jumpDuration = GetJumpDuration(initData, spawnMovementData, inputNoteJumpMovementSpeed, inputNoteJumpStartBeatOffset);
+    jumpDuration = GetJumpDuration(initData, spawnMovementData, njs, startBeatOffset);
 
     NEVector::Vector3 const forwardVec(spawnMovementData->forwardVec);
     NEVector::Vector3 const centerPos(spawnMovementData->centerPos);
 
-    jumpDistance = (inputNoteJumpMovementSpeed.value_or(spawnMovementData->noteJumpMovementSpeed)) * jumpDuration;
+    jumpDistance = (njs.value_or(spawnMovementData->noteJumpMovementSpeed)) * jumpDuration;
     localMoveEndPos = centerPos + (forwardVec * (jumpDistance * 0.5f));
     localJumpEndPos = centerPos - (forwardVec * (jumpDistance * 0.5f));
     localMoveStartPos = centerPos + (forwardVec * (spawnMovementData->moveDistance + (jumpDistance * 0.5f)));
@@ -53,12 +49,7 @@ constexpr float Orig_LineYPosForLineLayer(GlobalNamespace::NoteLineLayer lineLay
 }
 
 float
-SpawnDataHelper::LineYPosForLineLayer(BeatmapObjectSpawnMovementData *spawnMovementData, std::optional<float> height,
-                                      NoteLineLayer noteLineLayer) {
-    if (height) {
-        return  0.25f
-                + (height.value() * NECaches::get_noteLinesDistanceFast()); // offset by 0.25
-    }
-
-    return Orig_LineYPosForLineLayer(noteLineLayer);
+SpawnDataHelper::LineYPosForLineLayer(float height) {
+    return 0.25f
+           + (height * NECaches::get_noteLinesDistanceFast()); // offset by 0.25
 }

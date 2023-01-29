@@ -6,6 +6,7 @@
 #include "GlobalNamespace/MirroredGameNoteController.hpp"
 #include "GlobalNamespace/NoteFloorMovement.hpp"
 #include "GlobalNamespace/NoteJump.hpp"
+#include "GlobalNamespace/NoteCutInfo.hpp"
 #include "GlobalNamespace/NoteMovement.hpp"
 #include "GlobalNamespace/BaseNoteVisuals.hpp"
 #include "GlobalNamespace/CutoutAnimateEffect.hpp"
@@ -20,6 +21,7 @@
 #include "UnityEngine/GameObject.hpp"
 
 #include "NEConfig.h"
+#include "NEUtils.hpp"
 #include "Animation/AnimationHelper.h"
 #include "Animation/ParentObject.h"
 #include "tracks/shared/TimeSourceHelper.h"
@@ -27,6 +29,8 @@
 #include "NEHooks.h"
 #include "NECaches.h"
 #include "custom-json-data/shared/CustomBeatmapData.h"
+#include "sombrero/shared/linq_functional.hpp"
+#include "GlobalNamespace/BeatmapObjectManager.hpp"
 
 using namespace GlobalNamespace;
 using namespace UnityEngine;
@@ -34,6 +38,8 @@ using namespace TrackParenting;
 
 BeatmapObjectAssociatedData *noteUpdateAD = nullptr;
 TracksAD::TracksVector noteTracks;
+std::unordered_map<std::string_view, std::unordered_set<NoteController*>> linkedNotes;
+std::unordered_map<NoteController*, std::unordered_set<NoteController*>*> linkedLinkedNotes;
 
 CutoutEffect* NECaches::GetCutout(GlobalNamespace::NoteControllerBase *nc, NECaches::NoteCache &noteCache) {
     CutoutEffect *&cutoutEffect = noteCache.cutoutEffect;
@@ -78,27 +84,10 @@ float noteTimeAdjust(float original, float jumpDuration) {
     if (noteTracks.empty())
         return original;
 
-    Track* noteTrack = nullptr;
+    auto time = NoodleExtensions::getTimeProp(noteTracks);
 
-    if (noteTracks.size() > 1) {
-        auto trackIt = std::find_if(noteTracks.begin(), noteTracks.end(), [](Track *track) {
-            return track->properties.time.value.has_value();
-        });
-
-        if (trackIt != noteTracks.end()) {
-            noteTrack = *trackIt;
-        }
-    } else {
-        noteTrack = noteTracks.front();
-    }
-
-
-    if (noteTrack) {
-        Property &timeProperty = noteTrack->properties.time;
-        if (timeProperty.value) {
-            float time = timeProperty.value->linear;
-            return time * jumpDuration;
-        }
+    if (time) {
+        return *time * jumpDuration;
     }
 
     return original;
@@ -108,6 +97,8 @@ void NECaches::ClearNoteCaches() {
     NECaches::noteCache.clear();
     noteUpdateAD = nullptr;
     noteTracks.clear();
+    linkedNotes.clear();
+    linkedLinkedNotes.clear();
 }
 
 MAKE_HOOK_MATCH(NoteController_Init, &NoteController::Init, void,
@@ -138,11 +129,18 @@ MAKE_HOOK_MATCH(NoteController_Init, &NoteController::Init, void,
         return;
     BeatmapObjectAssociatedData &ad = getAD(customNoteData->customData);
 
-    if (!ad.parsed)
-        return;
+
+    CRASH_UNLESS(ad.parsed);
+
+    auto link = ad.objectData.link;
+    if (link) {
+        auto& list = linkedNotes[*link];
+        list.emplace(self);
+        linkedLinkedNotes[self] = &list;
+    }
 
     // TRANSPILERS SUCK!
-    auto flipYSide = ad.flip ? ad.flip->y : customNoteData->flipYSide;
+    auto flipYSide = ad.flipY ? *ad.flipY : customNoteData->flipYSide;
 
     if (flipYSide > 0.0f)
     {
@@ -212,6 +210,14 @@ MAKE_HOOK_MATCH(NoteController_Init, &NoteController::Init, void,
     ad.worldRotation = self->get_worldRotation();
     ad.localRotation = localRotation;
 
+    float num2 = jumpDuration * 0.5f;
+    float startVerticalVelocity = jumpGravity * num2;
+    float yOffset = (startVerticalVelocity * num2) - (jumpGravity * num2 * num2 * 0.5f);
+    Vector3 noteOffset = jumpEndPos;
+    noteOffset.z = 0;
+    noteOffset.y += yOffset;
+    ad.noteOffset = noteOffset;
+
 
     self->Update();
 }
@@ -256,10 +262,18 @@ MAKE_HOOK_MATCH(NoteController_ManualUpdate, &NoteController::ManualUpdate, void
     NoteJump *noteJump = self->noteMovement->jump;
     NoteFloorMovement *floorMovement = self->noteMovement->floorMovement;
 
-    float songTime = TimeSourceHelper::getSongTime(noteJump->audioTimeSyncController);
-    float elapsedTime = songTime - (customNoteData->time - (noteJump->jumpDuration * 0.5f));
-    elapsedTime = noteTimeAdjust(elapsedTime, noteJump->jumpDuration);
-    float normalTime = elapsedTime / noteJump->jumpDuration;
+    auto time = NoodleExtensions::getTimeProp(tracks);
+    float normalTime;
+    if (time)
+    {
+        normalTime = time.value();
+    }
+    else
+    {
+        float jumpDuration = noteJump->jumpDuration;
+        float elapsedTime = TimeSourceHelper::getSongTime(noteJump->audioTimeSyncController) - (customNoteData->time - (jumpDuration * 0.5f));
+        normalTime = elapsedTime / jumpDuration;
+    }
 
 
     AnimationHelper::ObjectOffset offset = AnimationHelper::GetObjectOffset(
@@ -381,9 +395,70 @@ MAKE_HOOK_MATCH(NoteController_ManualUpdate, &NoteController::ManualUpdate, void
     noteTracks.clear();
 }
 
+MAKE_HOOK_MATCH(NoteController_SendNoteWasCutEvent_LinkedNotes, &NoteController::SendNoteWasCutEvent, void,
+                NoteController *self, ByRef<::GlobalNamespace::NoteCutInfo> noteCutInfo) {
+    NoteController_SendNoteWasCutEvent_LinkedNotes(self, noteCutInfo);
+
+    if (!Hooks::isNoodleHookEnabled())
+        return;
+
+
+    auto *customNoteData =
+            reinterpret_cast<CustomJSONData::CustomNoteData *>(self->noteData);
+    if (!customNoteData->customData) {
+        return;
+    }
+
+    BeatmapObjectAssociatedData &ad = getAD(customNoteData->customData);
+
+    auto link = ad.objectData.link;
+
+    if (!link) return;
+
+    auto& list = linkedNotes[*link];
+
+    list.erase(self);
+    linkedLinkedNotes.erase(self);
+
+    auto cuts = list | Sombrero::Linq::Functional::Select([&](auto const& noteController) {
+        return std::pair(noteController, NoteCutInfo(noteController->noteData, noteCutInfo->speedOK, noteCutInfo->directionOK, noteCutInfo->saberTypeOK,
+                           noteCutInfo->wasCutTooSoon, noteCutInfo->saberSpeed, noteCutInfo->saberDir, noteCutInfo->saberType,
+                           noteCutInfo->timeDeviation, noteCutInfo->cutDirDeviation, noteCutInfo->cutPoint, noteCutInfo->cutNormal, noteCutInfo->cutDistanceToCenter,
+                           noteCutInfo->cutAngle, noteCutInfo->worldRotation, noteCutInfo->inverseWorldRotation, noteCutInfo->noteRotation, noteCutInfo->notePosition,
+                           noteCutInfo->saberMovementData));
+    }) | Sombrero::Linq::Functional::ToVector();
+
+    for (auto const& note : list) {
+        linkedLinkedNotes.erase(note);
+    }
+    list.clear();
+
+    for (auto& [noteController, cutInfo] : cuts) {
+        auto ref = ByRef<NoteCutInfo>(cutInfo);
+        noteController->SendNoteWasCutEvent(ref);
+    }
+}
+MAKE_HOOK_MATCH(BeatmapObjectManager_Despawn_LinkedNotes, static_cast<void (GlobalNamespace::BeatmapObjectManager::*)(::GlobalNamespace::NoteController*)>(&GlobalNamespace::BeatmapObjectManager::Despawn), void,
+                BeatmapObjectManager* self, GlobalNamespace::NoteController* noteController) {
+    BeatmapObjectManager_Despawn_LinkedNotes(self, noteController);
+
+    if (!Hooks::isNoodleHookEnabled())
+        return;
+
+
+    auto linkedLinkedIt = linkedLinkedNotes.find(noteController);
+    if (linkedLinkedIt != linkedLinkedNotes.end()) {
+        linkedLinkedIt->second->erase(noteController);
+        linkedLinkedNotes.erase(linkedLinkedIt);
+    }
+}
+
 void InstallNoteControllerHooks(Logger &logger) {
     INSTALL_HOOK(logger, NoteController_Init);
     INSTALL_HOOK(logger, NoteController_ManualUpdate);
+
+    INSTALL_HOOK(logger, NoteController_SendNoteWasCutEvent_LinkedNotes);
+    INSTALL_HOOK(logger, BeatmapObjectManager_Despawn_LinkedNotes);
 }
 
 NEInstallHooks(InstallNoteControllerHooks);
