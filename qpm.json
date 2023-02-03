@@ -34,7 +34,7 @@
     },
     {
       "id": "custom-json-data",
-      "versionRange": "^0.19.0",
+      "versionRange": "^0.18.1",
       "additionalData": {}
     },
     {
@@ -51,7 +51,7 @@
     },
     {
       "id": "tracks",
-      "versionRange": "^0.8.0",
+      "versionRange": "^0.7.1",
       "additionalData": {}
     },
     {
